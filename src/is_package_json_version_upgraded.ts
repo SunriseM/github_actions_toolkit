@@ -1,103 +1,107 @@
-
 import fetch from "node-fetch";
 const urlJoin: typeof import("path").join = require("url-join");
 import { setOutputFactory } from "./outputHelper";
 import { NpmModuleVersion } from "./tools/NpmModuleVersion";
 import { getActionParamsFactory } from "./inputHelper";
-import { createOctokit } from "./tools/createOctokit";
-import { getLatestSemVersionedTagFactory } from "./tools/octokit-addons/getLatestSemVersionedTag";
+import { createOctokit } from "./tools/createOctokit";
+import { getLatestSemVersionedTagFactory } from "./tools/octokit-addons/getLatestSemVersionedTag";
 
 export const { getActionParams } = getActionParamsFactory({
-    "inputNameSubset": [
-        "owner",
-        "repo",
-        "branch",
-        "github_token"
-    ] as const
+  inputNameSubset: ["owner", "repo", "branch", "github_token"] as const,
 });
 
 export type Params = ReturnType<typeof getActionParams>;
 
 type CoreLike = {
-    debug: (message: string) => void;
+  debug: (message: string) => void;
 };
 
-export const { setOutput } = setOutputFactory<"from_version" | "to_version" | "is_upgraded_version">();
+export const { setOutput } = setOutputFactory<
+  "from_version" | "to_version" | "is_upgraded_version"
+>();
 
 export async function action(
-    _actionName: "is_package_json_version_upgraded",
-    params: Params,
-    core: CoreLike
+  _actionName: "is_package_json_version_upgraded",
+  params: Params,
+  core: CoreLike
 ): Promise<Parameters<typeof setOutput>[0]> {
+  core.debug(JSON.stringify(params));
 
-    core.debug(JSON.stringify(params));
+  const { owner, repo, branch, github_token } = params;
 
-    const { owner, repo, branch, github_token } = params;
+  const to_version = await getPackageJsonVersion({
+    owner,
+    repo,
+    branch,
+    token: github_token,
+  });
 
-    const to_version = await getPackageJsonVersion({ owner, repo, branch, token: github_token });
+  if (to_version === undefined) {
+    throw new Error(
+      "No version in package.json on ${owner}/${repo}#${branch} (or repo is private)"
+    );
+  }
 
-    if( to_version === undefined ){
-        throw new Error("No version in package.json on ${owner}/${repo}#${branch} (or repo is private)");
-    }
+  core.debug(
+    `Version on ${owner}/${repo}#${branch} is ${NpmModuleVersion.stringify(
+      to_version
+    )}`
+  );
 
-    core.debug(`Version on ${owner}/${repo}#${branch} is ${NpmModuleVersion.stringify(to_version)}`);
+  const octokit = createOctokit({ github_token });
 
-    const octokit = createOctokit({ github_token });
+  const { getLatestSemVersionedTag } = getLatestSemVersionedTagFactory({
+    octokit,
+  });
 
-    const { getLatestSemVersionedTag } = getLatestSemVersionedTagFactory({ octokit });
+  const { version: from_version } = await getLatestSemVersionedTag({
+    owner,
+    repo,
+  }).then((wrap) =>
+    wrap === undefined ? { version: NpmModuleVersion.parse("0.0.0") } : wrap
+  );
 
-    const { version: from_version } = await getLatestSemVersionedTag({ owner, repo })
-        .then(wrap => wrap === undefined ? { "version": NpmModuleVersion.parse("0.0.0") } : wrap);
+  core.debug(`Last version was ${NpmModuleVersion.stringify(from_version)}`);
 
-    core.debug(`Last version was ${NpmModuleVersion.stringify(from_version)}`);
+  const is_upgraded_version =
+    NpmModuleVersion.compare(to_version, from_version) === 1 ? "true" : "false";
 
-    const is_upgraded_version = NpmModuleVersion.compare(
-        to_version,
-        from_version
-    ) === 1 ? "true" : "false";
+  core.debug(`Is version upgraded: ${is_upgraded_version}`);
 
-    core.debug(`Is version upgraded: ${is_upgraded_version}`);
-
-    return {
-        "to_version": NpmModuleVersion.stringify(to_version),
-        "from_version": NpmModuleVersion.stringify(from_version),
-        is_upgraded_version
-    };
-
+  return {
+    to_version: NpmModuleVersion.stringify(to_version),
+    from_version: NpmModuleVersion.stringify(from_version),
+    is_upgraded_version,
+  };
 }
 
 //TODO: Find a way to make it work with private repo
 async function getPackageJsonVersion(params: {
-    owner: string;
-    repo: string;
-    branch: string;
-    token: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  token: string;
 }): Promise<NpmModuleVersion | undefined> {
+  const { owner, repo, branch, token } = params;
 
-    const { owner, repo, branch, token } = params;
-    
-    const url = urlJoin(
-        "https://",
-        token,
-        "@raw.githubusercontent.com"
-        owner,
-        repo,
-        branch,
-        "package.json"
-    );
+  const url = urlJoin(
+    "https://",
+    `${token}@raw.githubusercontent.com`,
+    owner,
+    repo,
+    branch,
+    "package.json"
+  );
 
-    const version = await fetch(url)
-        .then(res => res.text())
-        .then(text => JSON.parse(text))
-        .then(({ version }) => version as string)
-        .catch(()=> undefined)
-        ;
+  const version = await fetch(url)
+    .then((res) => res.text())
+    .then((text) => JSON.parse(text))
+    .then(({ version }) => version as string)
+    .catch(() => undefined);
 
-    if( version === undefined){
-        return undefined;
-    }
+  if (version === undefined) {
+    return undefined;
+  }
 
-    return NpmModuleVersion.parse(version);
-
+  return NpmModuleVersion.parse(version);
 }
-

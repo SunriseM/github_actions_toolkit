@@ -34,7 +34,7 @@ export async function action(
 
     const { owner, repo, branch, github_token } = params;
 
-    const to_version = await getPackageJsonVersion({ owner, repo, branch });
+    const to_version = await getPackageJsonVersion({ owner, repo, branch, token: github_token });
 
     if( to_version === undefined ){
         throw new Error("No version in package.json on ${owner}/${repo}#${branch} (or repo is private)");
@@ -71,19 +71,20 @@ async function getPackageJsonVersion(params: {
     owner: string;
     repo: string;
     branch: string;
+    token: string;
 }): Promise<NpmModuleVersion | undefined> {
 
-    const { owner, repo, branch } = params;
+    const { owner, repo, branch, token } = params;
+    
+    const url = urlJoin(
+        `https://raw.github.com`,
+        owner,
+        repo,
+        branch,
+        "package.json"
+    );
 
-    const version = await fetch(
-        urlJoin(
-            `https://raw.github.com`,
-            owner,
-            repo,
-            branch,
-            "package.json"
-        )
-    )
+    const version = await fetch(url, { headers: { Authorization: `token ${token}` })
         .then(res => res.text())
         .then(text => JSON.parse(text))
         .then(({ version }) => version as string)

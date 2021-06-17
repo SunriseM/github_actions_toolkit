@@ -77,14 +77,16 @@ async function getPackageJsonVersion(params: {
     const { owner, repo, branch, token } = params;
     
     const url = urlJoin(
-        `https://raw.github.com`,
+        "https://",
+        token,
+        "@raw.githubusercontent.com"
         owner,
         repo,
         branch,
         "package.json"
     );
 
-    const version = await fetch(url, { headers: { Authorization: `token ${token}` })
+    const version = await fetch(url)
         .then(res => res.text())
         .then(text => JSON.parse(text))
         .then(({ version }) => version as string)
